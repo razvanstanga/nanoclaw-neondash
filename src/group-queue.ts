@@ -17,6 +17,7 @@ const BASE_RETRY_MS = 5000;
 interface GroupState {
   active: boolean;
   idleWaiting: boolean;
+  closingSent: boolean;
   isTaskContainer: boolean;
   runningTaskId: string | null;
   pendingMessages: boolean;
@@ -41,6 +42,7 @@ export class GroupQueue {
       state = {
         active: false,
         idleWaiting: false,
+        closingSent: false,
         isTaskContainer: false,
         runningTaskId: null,
         pendingMessages: false,
@@ -159,7 +161,12 @@ export class GroupQueue {
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder || state.isTaskContainer)
+    if (
+      !state.active ||
+      !state.groupFolder ||
+      state.isTaskContainer ||
+      state.closingSent
+    )
       return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
@@ -184,6 +191,7 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder) return;
 
+    state.closingSent = true;
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
@@ -200,6 +208,7 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
     state.active = true;
     state.idleWaiting = false;
+    state.closingSent = false;
     state.isTaskContainer = false;
     state.pendingMessages = false;
     this.activeCount++;
@@ -223,6 +232,7 @@ export class GroupQueue {
       this.scheduleRetry(groupJid, state);
     } finally {
       state.active = false;
+      state.closingSent = false;
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
@@ -235,6 +245,7 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
     state.active = true;
     state.idleWaiting = false;
+    state.closingSent = false;
     state.isTaskContainer = true;
     state.runningTaskId = task.id;
     this.activeCount++;
@@ -250,6 +261,7 @@ export class GroupQueue {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
       state.active = false;
+      state.closingSent = false;
       state.isTaskContainer = false;
       state.runningTaskId = null;
       state.process = null;
