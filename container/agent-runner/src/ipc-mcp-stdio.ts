@@ -10,6 +10,7 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
+import { convertMessage, MessageFormat } from './format-converter.js';
 
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -19,6 +20,7 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+const messageFormat = (process.env.NANOCLAW_MESSAGE_FORMAT || 'html') as MessageFormat;
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -47,12 +49,14 @@ server.tool(
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
   },
   async (args) => {
+    const convertedText = convertMessage(args.text, messageFormat);
     const data: Record<string, string | undefined> = {
       type: 'message',
       chatJid,
-      text: args.text,
+      text: convertedText,
       sender: args.sender || undefined,
       groupFolder,
+      messageFormat,
       timestamp: new Date().toISOString(),
     };
 
@@ -298,6 +302,66 @@ server.tool(
     writeIpcFile(TASKS_DIR, data);
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} update requested.` }] };
+  },
+);
+
+server.tool(
+  'send_screenshot',
+  'Send an image file to the user. Reads the file server-side and delivers it as an image — keeps base64 data out of your context window. Use this instead of base64-encoding the image yourself.',
+  {
+    path: z.string().describe('Absolute path to the image file (e.g. /workspace/group/screenshots/latest.png)'),
+    caption: z.string().optional().describe('Optional caption to display with the image'),
+  },
+  async (args) => {
+    let imageData: Buffer;
+    try {
+      imageData = fs.readFileSync(args.path);
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+
+    const ext = path.extname(args.path).toLowerCase().replace('.', '') || 'png';
+    const mimeMap: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
+    const mimeType = mimeMap[ext] || 'image/png';
+    const base64 = imageData.toString('base64');
+    const imgHtml = `<img src="data:${mimeType};base64,${base64}" alt="${args.caption || 'screenshot'}" />`;
+    const convertedText = convertMessage(imgHtml, messageFormat);
+
+    const data: Record<string, string | undefined> = {
+      type: 'message',
+      chatJid,
+      text: convertedText,
+      groupFolder,
+      messageFormat,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: 'Screenshot sent.' }] };
+  },
+);
+
+server.tool(
+  'set_response_format',
+  'Switch the response format for this tile between HTML and Markdown. The agent calls this when the user asks to change how responses are formatted.',
+  {
+    format: z.enum(['html', 'markdown']).describe('The new response format'),
+  },
+  async (args) => {
+    const data = {
+      type: 'set_neondash_format',
+      groupFolder,
+      format: args.format,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Response format set to ${args.format}.` }] };
   },
 );
 

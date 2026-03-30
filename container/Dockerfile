@@ -48,6 +48,16 @@ COPY agent-runner/ ./
 # Build TypeScript
 RUN npm run build
 
+# NeonDash Push integration (optional — leave blank to disable nd_push_send tool)
+ARG ND_PUSH_SERVICE_URL=""
+ARG ND_PUSH_APP_TOKEN=""
+ENV ND_PUSH_SERVICE_URL=${ND_PUSH_SERVICE_URL}
+ENV ND_PUSH_APP_TOKEN=${ND_PUSH_APP_TOKEN}
+
+# Copy and build NeonDash MCP server
+COPY neondash-mcp-server/ /opt/nanoclaw/container/neondash-mcp-server/
+RUN cd /opt/nanoclaw/container/neondash-mcp-server && npm install && npm run build
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 

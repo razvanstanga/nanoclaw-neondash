@@ -10,3 +10,6 @@
 // telegram
 
 // whatsapp
+
+// neondash
+import './neondash.js';

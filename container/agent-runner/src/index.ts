@@ -29,6 +29,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  messageFormat?: 'html' | 'markdown';
 }
 
 interface ContainerOutput {
@@ -36,6 +37,7 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  messageFormat?: 'html' | 'markdown';
 }
 
 interface SessionEntry {
@@ -337,6 +339,7 @@ async function runQuery(
   mcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
+  tileConfig: Record<string, unknown> | null,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
@@ -423,8 +426,19 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            NANOCLAW_MESSAGE_FORMAT: containerInput.messageFormat || 'html',
           },
         },
+        ...(fs.existsSync('/opt/nanoclaw/container/neondash-mcp-server/dist/index.js') ? {
+          neondash: {
+            command: 'node',
+            args: ['/opt/nanoclaw/container/neondash-mcp-server/dist/index.js'],
+            env: {
+              NEONDASH_CONFIG: JSON.stringify(tileConfig?.mcpServices ?? {}),
+              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+            },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
@@ -456,7 +470,8 @@ async function runQuery(
       writeOutput({
         status: 'success',
         result: textResult || null,
-        newSessionId
+        newSessionId,
+        messageFormat: containerInput.messageFormat,
       });
     }
   }
@@ -532,6 +547,25 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Load tile config from nd-config.json if present (NeonDash groups)
+  let tileConfig: Record<string, unknown> | null = null;
+  const tileConfigPath = '/workspace/group/nd-config.json';
+  if (fs.existsSync(tileConfigPath)) {
+    try {
+      tileConfig = JSON.parse(fs.readFileSync(tileConfigPath, 'utf-8'));
+    } catch (err) {
+      log(`Failed to read nd-config.json: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Resolve messageFormat: input > nd-config.json > default 'html'
+  if (!containerInput.messageFormat && tileConfig?.messageFormat) {
+    containerInput.messageFormat = tileConfig.messageFormat as 'html' | 'markdown';
+  }
+  if (!containerInput.messageFormat) {
+    containerInput.messageFormat = 'html';
+  }
+
   // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
   // No real secrets exist in the container environment.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
@@ -582,7 +616,7 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, tileConfig, resumeAt);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
