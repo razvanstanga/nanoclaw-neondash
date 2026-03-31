@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { resolveTileEntry, readConfig } from '../config.js';
-import { ndGet, ndCmd, ndSearch, pick } from '../http.js';
+import { ndGet, ndCmd, ndSearch, pick, openUrl } from '../http.js';
 import type { RssItem, RssFeed, RssResponse, InteractionEntry, RecContextUnreadItem, RecContextResponse } from '../types.js';
 
 function safeDate(s?: string): string {
@@ -35,7 +35,17 @@ For full-archive search use nd_rss_search instead.`,
                 tile: args.tile ?? entry.id, tileId: entry.id,
                 total: items.length,
                 unreadCount: items.filter(i => !i.read).length,
-                items: pick(items.slice(0, limit), ['id','title','description','link','pubDate','feedLabel','feedId','read','starred']),
+                items: items.slice(0, limit).map(i => ({
+                    id:        i.id,
+                    title:     i.title,
+                    description: i.description,
+                    link:      openUrl(entry.serviceUrl, entry.id, i.id),
+                    pubDate:   i.pubDate,
+                    feedLabel: i.feedLabel,
+                    feedId:    i.feedId,
+                    read:      i.read,
+                    starred:   i.starred,
+                })),
                 truncated: items.length > limit,
             }, null, 2) }] };
         } catch (err) {
@@ -64,7 +74,17 @@ Searches title, description, and feedLabel (case-insensitive substring).`,
                 tile: args.tile ?? entry.id, tileId: entry.id,
                 query: args.query,
                 total: items.length,
-                items: pick(items.slice(0, limit), ['id','title','description','link','pubDate','feedLabel','feedId','read','starred']),
+                items: items.slice(0, limit).map(i => ({
+                    id:          i.id,
+                    title:       i.title,
+                    description: i.description,
+                    link:        openUrl(entry.serviceUrl, entry.id, i.id),
+                    pubDate:     i.pubDate,
+                    feedLabel:   i.feedLabel,
+                    feedId:      i.feedId,
+                    read:        i.read,
+                    starred:     i.starred,
+                })),
                 truncated: items.length > limit,
             }, null, 2) }] };
         } catch (err) {
@@ -186,7 +206,7 @@ server.tool(
     'nd_rss_get_rec_context',
     `Get a token-efficient recommendation context bundle.
 
-Returns condensed interaction history (reading patterns) + current unread article headlines with short descriptions.
+Returns condensed interaction history (reading patterns) + current unread article headlines with short descriptions and links.
 Call this ONCE at the start of a recommendation or briefing session — it covers everything needed in a single call.
 Descriptions are capped at 200 chars. For full article content, call nd_rss_get on the relevant tile.`,
     {
@@ -217,10 +237,11 @@ Descriptions are capped at 200 chars. For full article content, call nd_rss_get 
                 const data = await ndGet(tile.serviceUrl, tile.id, tile.authHeaders) as RssResponse;
                 for (const item of (data.items ?? []).filter((i: RssItem) => !i.read)) {
                     allUnread.push({
-                        feed:  item.feedLabel ?? '',
-                        title: item.title     ?? '',
+                        feed:  item.feedLabel    ?? '',
+                        title: item.title        ?? '',
                         date:  safeDate(item.pubDate),
                         desc:  (item.description ?? '').slice(0, 200),
+                        link:  openUrl(tile.serviceUrl, tile.id, item.id),
                     });
                     if (allUnread.length >= totalUnreadLimit) break;
                 }

@@ -28,6 +28,7 @@ export interface InteractionEntry {
     tileId:    string;
     title:     string;
     feedLabel: string;
+    link?:     string;
     ts:        number;
 }
 
@@ -36,6 +37,7 @@ export interface RecContextUnreadItem {
     title: string;
     date:  string;
     desc:  string;
+    link:  string;
 }
 
 export interface RecContextResponse {

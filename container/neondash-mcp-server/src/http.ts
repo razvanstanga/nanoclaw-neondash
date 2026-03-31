@@ -31,6 +31,10 @@ export function pick<T extends object>(items: T[], keys: (keyof T)[]): Partial<T
     });
 }
 
+export function openUrl(serviceUrl: string, tileId: string, itemId: string): string {
+    return `${serviceUrl}/api/${encodeURIComponent(tileId)}/open/${encodeURIComponent(itemId)}`;
+}
+
 export async function ndSearch<T>(
     baseUrl: string,
     tileId: string,
